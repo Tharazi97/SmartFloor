@@ -129,3 +129,41 @@ void ESP01::flush()
         _wifi->getc();
     }
 }
+
+void ESP01::setupAES(const char *key, const char *iv)
+{
+    _key = key;
+    _iv = iv;
+}
+
+bool ESP01::sendCodedBytes(const char *msg, uint16_t size, uint32_t timeout_ms)
+{
+    while (_wifi->readable()) { // Read all data on serial
+        char ch = _wifi->getc();
+        printf("%c", ch);
+    }
+    // Send command and msg
+    if (!sendCommand("AT+CIPSEND=0," + to_string(size) + "\r\n", ">", timeout_ms)) {
+        return false;
+    }
+
+    // AES coding
+    char codedMsg[size];
+    memcpy(codedMsg, msg, size);
+    _aes.setup(_key, AES::KEY_256, AES::MODE_CBC, _iv);
+    _aes.encrypt(codedMsg, sizeof(codedMsg));
+    _aes.clear();
+    for (int i = 0; i < size; ++i) {
+        _wifi->putc(codedMsg[i]);
+    }
+    _wifi->puts("\r\n");
+
+    if (!echoFind("OK", timeout_ms)) {      // timed out waiting for ack string
+        return false;    // ack blank or ack found
+    }
+
+    if (!sendCommand("AT+CIPCLOSE=0\r\n", "OK", timeout_ms)) {
+        return false;
+    }
+    return true;
+}
