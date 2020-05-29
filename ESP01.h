@@ -20,4 +20,6 @@ public:
     void flush();
     void setupAES(const char *key, const char *iv);
     bool sendCodedBytes(const char *msg, uint16_t size, uint32_t timeout_ms = 5000);
+    bool connectClient(string address, string port);
+    bool sendGETRequest(string request, string host, string &respond, uint32_t timeout_ms = 5000);
 };

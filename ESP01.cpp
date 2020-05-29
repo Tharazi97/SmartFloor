@@ -54,13 +54,24 @@ bool ESP01::connect(string name, string password)
     if (!sendCommand("AT+CWMODE=1\r\n", "OK", 5000)) { // Change mode to client
         return false;
     }
-    if (!sendCommand("AT+CWJAP=\"" + name + "\",\"" + password + "\"\r\n", "OK", 60000)) { // Connect to wifi
+    if (!sendCommand("AT+CIPMODE=0\r\n", "OK", 5000)) { // TCPIP non transparent mode
         return false;
     }
     if (!sendCommand("AT+CIPMUX=1\r\n", "OK", 5000)) { // Multiple outputs
         return false;
     }
+    if (!sendCommand("AT+CWJAP=\"" + name + "\",\"" + password + "\"\r\n", "OK", 60000)) { // Connect to wifi
+        return false;
+    }
     if (!sendCommand("AT+CIPSERVER=1,80\r\n", "OK", 5000)) { // Start working as a server
+        return false;
+    }
+    return true;
+}
+
+bool ESP01::connectClient(string address, string port)
+{
+    if (!sendCommand("AT+CIPSTART=0,\"TCP\",\"" + address + "\"," + port + "\r\n", "OK", 5000)) {
         return false;
     }
     return true;
@@ -76,9 +87,11 @@ bool ESP01::sendString(string msg, uint32_t timeout_ms)
     if (!sendCommand("AT+CIPSEND=0," + to_string(msg.length()) + "\r\n", ">", timeout_ms)) {
         return false;
     }
-    if (!sendCommand(msg + "\r\n", "OK", timeout_ms)) {
+    _wifi->puts((msg + "\r\n").c_str()); // Send actual string
+    if (!echoFind("OK", timeout_ms)) {
         return false;
     }
+    flush(); //response from the server
     if (!sendCommand("AT+CIPCLOSE=0\r\n", "OK", timeout_ms)) {
         return false;
     }
@@ -113,11 +126,14 @@ bool ESP01::sendBytes(const char *msg, uint16_t size, uint32_t timeout_ms)
 
 bool ESP01::readToString(string &msg)
 {
-    if (!_wifi->readable()) {
-        return false;
-    } else {
-        while (_wifi->readable()) {
-            msg += _wifi->getc();
+    Timer tim;
+    tim.start();
+    while (tim.read_ms() < 200) {
+        if (_wifi->readable()) {
+            char ch = _wifi->getc();
+            msg.push_back(ch);
+            //printf("%c", ch);
+            tim.reset();
         }
     }
     return true;
@@ -162,6 +178,30 @@ bool ESP01::sendCodedBytes(const char *msg, uint16_t size, uint32_t timeout_ms)
         return false;    // ack blank or ack found
     }
 
+    if (!sendCommand("AT+CIPCLOSE=0\r\n", "OK", timeout_ms)) {
+        return false;
+    }
+    return true;
+}
+
+bool ESP01::sendGETRequest(string request, string host, string &respond, uint32_t timeout_ms)
+{
+    if (!connectClient(host, "80")) {
+        return false;
+    }
+    while (_wifi->readable()) { // Read all data on serial
+        char ch = _wifi->getc();
+        printf("%c", ch);
+    }
+    // Send command and msg
+    if (!sendCommand("AT+CIPSEND=0," + to_string(request.length() + host.length() + 25) + "\r\n", ">", timeout_ms)) {
+        return false;
+    }
+    _wifi->puts(("GET " + request + " HTTP/1.1\r\nHost: " + host + "\r\n\r\n").c_str()); // Send request
+    if (!echoFind("OK", timeout_ms)) {
+        return false;
+    }
+    readToString(respond); //response from the server
     if (!sendCommand("AT+CIPCLOSE=0\r\n", "OK", timeout_ms)) {
         return false;
     }
